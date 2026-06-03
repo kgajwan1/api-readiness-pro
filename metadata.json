@@ -1,0 +1,6 @@
+{
+  "name": "API Readiness Pro",
+  "description": "Enterprise-grade API analyzer, security auditor, and documentation coverage tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

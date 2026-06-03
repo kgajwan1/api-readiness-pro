@@ -1,0 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0A0A0B;
+  --color-surface: #161618;
+  --color-surface-dim: #0D0D0E;
+  --color-surface-bright: #242427;
+  --color-surface-container-lowest: #020203;
+  --color-surface-container-low: #0D0D0E;
+  --color-surface-container: #161618;
+  --color-surface-container-high: #202023;
+  --color-surface-container-highest: #2C2C30;
+  --color-on-surface: #E0E0E6;
+  --color-on-surface-variant: #A1A1AA;
+  --color-inverse-surface: #E0E0E6;
+  --color-inverse-on-surface: #18181B;
+  --color-outline: #52525B;
+  --color-outline-variant: #27272A;
+  --color-surface-tint: #34D399;
+  --color-primary: #34D399;
+  --color-on-primary: #022C22;
+  --color-primary-container: #059669;
+  --color-on-primary-container: #ECFDF5;
+  --color-inverse-primary: #10B981;
+  --color-secondary: #E4E4E7;
+  --color-on-secondary: #18181B;
+  --color-secondary-container: #27272A;
+  --color-on-secondary-container: #F4F4F5;
+  --color-tertiary: #A7F3D0;
+  --color-on-tertiary: #044E36;
+  --color-tertiary-container: #064E3B;
+  --color-on-tertiary-container: #D1FAE5;
+  --color-error: #FCA5A5;
+  --color-on-error: #7F1D1D;
+  --color-error-container: #991B1B;
+  --color-on-error-container: #FEE2E2;
+  --color-on-background: #E0E0E6;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  scrollbar-color: #27272A #0A0A0B;
+  scrollbar-width: thin;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0A0A0B;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}
+
+/* Custom styles for Circular Progress Ring to preserve exact layout */
+.circular-progress {
+  position: relative;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease, filter 0.3s ease;
+}
+
+.circular-progress:hover {
+  transform: scale(1.04);
+}
+
+/* Markdown styling helper for reports */
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  font-weight: 700;
+  color: #dae2fd;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-body h1 {
+  font-size: 1.35rem;
+  border-bottom: 1px solid #434655;
+  padding-bottom: 0.25rem;
+}
+.markdown-body h2 {
+  font-size: 1.15rem;
+}
+.markdown-body h3 {
+  font-size: 1rem;
+}
+.markdown-body p {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #c3c6d7;
+  margin-bottom: 0.75rem;
+}
+.markdown-body ul {
+  list-style-type: decimal;
+  padding-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.markdown-body li {
+  font-size: 0.875rem;
+  color: #c3c6d7;
+  margin-bottom: 0.25rem;
+}
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background-color: #060e20;
+  padding: 0.125rem 0.25rem;
+  border-radius: 3px;
+  color: #d2bbff;
+}
+.markdown-body pre {
+  background-color: #060e20;
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  border: 1px solid #434655;
+  margin-bottom: 1rem;
+}
+.markdown-body pre code {
+  color: #dae2fd;
+  background-color: transparent;
+  padding: 0;
+}
+.markdown-body blockquote {
+  border-left: 3px solid #b4c5ff;
+  padding-left: 0.75rem;
+  color: #8d90a0;
+  font-style: italic;
+  margin-bottom: 0.75rem;
+}
