@@ -1,0 +1,55 @@
+openapi: 3.0.0
+info:
+  title: Payment Gateway Service
+  version: 2.0.0
+  description: >
+    Handles payment intents, refunds, and settlement webhooks for a
+    consumer checkout flow.
+paths:
+  /payments:
+    post:
+      summary: Create a payment intent
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, currency]
+              properties:
+                amount: { type: integer }
+                currency: { type: string }
+      responses:
+        '200':
+          description: Payment intent created.
+  /refunds:
+    post:
+      summary: Issue a refund against a captured payment
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentId, amount]
+              properties:
+                paymentId: { type: string }
+                amount: { type: integer }
+      responses:
+        '200':
+          description: Refund issued.
+  /webhooks:
+    post:
+      summary: Settlement webhook receiver
+      description: >
+        Called by the upstream processor when a payment or refund
+        settles. No idempotency key is required on this endpoint, so
+        a redelivered webhook (network retry, processor at-least-once
+        delivery) replays the same settlement mutation twice.
+      responses:
+        '200':
+          description: Webhook acknowledged.

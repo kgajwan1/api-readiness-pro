@@ -18,14 +18,22 @@ async function startServer() {
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-  // Initialize server-side Gemini client lazily
+  // Initialize server-side Gemini client lazily with runtime key storage
   let aiClient: GoogleGenAI | null = null;
+  let runtimeGeminiApiKey: string | undefined = process.env.GEMINI_API_KEY;
+
+  function setGeminiApiKey(key: string) {
+    runtimeGeminiApiKey = key;
+    process.env.GEMINI_API_KEY = key;
+    aiClient = null;
+  }
+
   function getAiClient(): GoogleGenAI {
+    const apiKey = runtimeGeminiApiKey;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured. Enter your Gemini key via the UI or environment variables.");
+    }
     if (!aiClient) {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY environment variable is missing. Please set it in Settings > Secrets.");
-      }
       aiClient = new GoogleGenAI({
         apiKey,
         httpOptions: {
@@ -37,6 +45,17 @@ async function startServer() {
     }
     return aiClient;
   }
+
+  // Endpoint for configuring Gemini API key from the frontend
+  app.post("/api/gemini-key", (req, res) => {
+    const { apiKey } = req.body;
+    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
+      return res.status(400).json({ error: "API key is required." });
+    }
+
+    setGeminiApiKey(apiKey.trim());
+    return res.json({ status: "ok", keyConfigured: true });
+  });
 
   // API endpoint for analysis
   app.post("/api/analyze", async (req, res) => {
@@ -188,7 +207,7 @@ Return the result as a raw JSON payload fitting the required responseSchema prec
 
   // Provide health status endpoint
   app.get("/api/health", (req, res) => {
-    res.json({ status: "healthy", keyConfigured: !!process.env.GEMINI_API_KEY });
+    res.json({ status: "healthy", keyConfigured: !!runtimeGeminiApiKey });
   });
 
   // Serve Frontend depending on environment

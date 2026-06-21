@@ -26,462 +26,10 @@ import {
   Database
 } from "lucide-react";
 import { DEFAULT_PROJECTS, TEMPLATE_SCHEMAS } from "./data";
-import { ProjectAnalysis, Finding } from "./types";
-
-interface PipelineStep {
-  id: string;
-  name: string;
-  subLabel: string;
-  desc: string;
-  logPattern: string[];
-}
-
-const PIPELINE_STEPS: PipelineStep[] = [
-  {
-    id: "upload",
-    name: "Upload Package",
-    subLabel: "OpenAPI + Code + Config",
-    desc: "Ingesting files, directory configurations, and swagger specifications.",
-    logPattern: [
-      "Detected package.json, openapi.yaml, and code sources",
-      "Scanning file tree topology for API entry points",
-      "Package payload parsed: 12 submodules, 3 routes modules"
-    ]
-  },
-  {
-    id: "parser",
-    name: "AST Route Matcher",
-    subLabel: "Syntax & Structure Analysis",
-    desc: "Compiling programmatic endpoint trees and router definitions.",
-    logPattern: [
-      "Evaluating router structures without AI dependencies",
-      "Mapping relative endpoint pathways with middleware indices",
-      "Binding input parameters and payload boundaries"
-    ]
-  },
-  {
-    id: "extractor",
-    name: "Domain Extractor",
-    subLabel: "Data Model Recovery",
-    desc: "Extracting entity boundaries, data models, and dependency trees.",
-    logPattern: [
-      "Extracting domain entities: 'User', 'PaymentIntent', 'Subscription'",
-      "Evaluating request payload schemas against DB boundaries",
-      "Tracing internal subservice data dependency trees"
-    ]
-  },
-  {
-    id: "graph",
-    name: "State Graph Builder",
-    subLabel: "Action Transition Maps",
-    desc: "Constructing reactive graphs of possible API state transitions.",
-    logPattern: [
-      "Constructing state transition nodes representing controller logic",
-      "Tracing state paths with transition rules: init -> pending -> captured",
-      "Graph resolved: 18 state transitions, 3 cyclic loops found"
-    ]
-  },
-  {
-    id: "simulation",
-    name: "Simulation Engine",
-    subLabel: "Failure Scenario Runner",
-    desc: "Subjecting the state graph to concurrent edge cases and fuzzing.",
-    logPattern: [
-      "Simulating threat vectors: network latency, token expiry, null references",
-      "Triggering failure scenario runner: 5 hazard injections initiated",
-      "Detected drift in failure recovery handling under load scenario"
-    ]
-  },
-  {
-    id: "risk",
-    name: "Risk Engine",
-    subLabel: "Threat Rating & Scoring",
-    desc: "Scoring vulnerabilities based on OWASP Top 10 and STRIDE security thresholds.",
-    logPattern: [
-      "Analyzing security gaps against OWASP API Security Top 10",
-      "Risk Score adjusted: High exposure on unauthorized transition in gateway",
-      "Categorizing risk tags: BOLA, Broken authentication, Mass Assignment"
-    ]
-  },
-  {
-    id: "explanation",
-    name: "AI Explanation Layer",
-    subLabel: "Gemini Remediator (Optional)",
-    desc: "Enabling semantic feedback and custom code patches on-demand.",
-    logPattern: [
-      "Securing AI endpoint triggers",
-      "Ready to synthesize custom explanation summaries on clicked vulnerabilities"
-    ]
-  },
-  {
-    id: "dashboard",
-    name: "UI Dashboard",
-    subLabel: "Visual Output Delivery",
-    desc: "Syncing audit telemetry to active scorecards and findings lists.",
-    logPattern: [
-      "Formulating metrics payload: Readiness 92%, Security 88%",
-      "Pushing real-time updates to live telemetry visualizer",
-      "Analysis pipeline execution completed!"
-    ]
-  }
-];
-
-// Offline, deterministic rule-based analysis engine
-export function parseLocalEndpoints(projectName: string, schemaText: string): { 
-  endpoints: string[]; 
-  findings: Finding[]; 
-  insights: { text: string; type: "critical" | "warning" | "success"; timestamp: string }[];
-  overallScore: number;
-  securityScore: number;
-  documentationScore: number;
-} {
-  const lines = schemaText.split("\n");
-  const endpoints: string[] = [];
-  const findings: Finding[] = [];
-  const insights: { text: string; type: "critical" | "warning" | "success"; timestamp: string }[] = [];
-  
-  // Rule checks
-  let hasWildcardCors = false;
-  let hasUnauthenticatedWebhooks = false;
-  let hasAdminRoguePaths = false;
-  let hasHttpInsecure = false;
-  let authEnforcedCount = 0;
-  let undocumentedPaths = 0;
-  
-  // Detect if user is specifically triggering the "Duplicate Success Webhook" scenario
-  const cleanSchemaLower = schemaText.toLowerCase();
-  const isDuplicateSuccessWebhookScenario = 
-    (cleanSchemaLower.includes("payments") || cleanSchemaLower.includes("/payments")) &&
-    (cleanSchemaLower.includes("refunds") || cleanSchemaLower.includes("/refunds")) &&
-    (cleanSchemaLower.includes("webhooks") || cleanSchemaLower.includes("/webhooks") || cleanSchemaLower.includes("webhook"));
-
-  if (isDuplicateSuccessWebhookScenario) {
-    endpoints.push("POST /payments");
-    endpoints.push("POST /refunds");
-    endpoints.push("POST /webhooks");
-  } else {
-    lines.forEach((line) => {
-      const cleanLine = line.trim().toLowerCase();
-      
-      if (cleanLine.includes("cors: *") || cleanLine.includes("access-control-allow-origin: *") || cleanLine.includes("cors: wildcard") || cleanLine.includes("allow-origin: *")) {
-        hasWildcardCors = true;
-      }
-      if ((cleanLine.includes("webhook") || cleanLine.includes("payout")) && (cleanLine.includes("unauthenticated") || cleanLine.includes("no signature") || cleanLine.includes("anonymous"))) {
-        hasUnauthenticatedWebhooks = true;
-      }
-      if ((cleanLine.includes("admin") || cleanLine.includes("refund")) && (cleanLine.includes("no tls") || cleanLine.includes("unsecure") || cleanLine.includes("without scope") || cleanLine.includes("unauthenticated"))) {
-        hasAdminRoguePaths = true;
-      }
-      if (cleanLine.includes("http://") && !cleanLine.includes("https://")) {
-        hasHttpInsecure = true;
-      }
-      if (cleanLine.includes("bearer") || cleanLine.includes("jwt") || cleanLine.includes("security:") || cleanLine.includes("auth") || cleanLine.includes("apikey")) {
-        authEnforcedCount++;
-      }
-      if (cleanLine.includes("missing description") || cleanLine.includes("undocumented") || cleanLine.includes("blank parameter")) {
-        undocumentedPaths++;
-      }
-
-      // Capture standard path endpoints
-      const pathMatch = line.match(/(?:\/v[0-9]\/[a-zA-Z0-9_\-\/:]+|\/[a-zA-Z0-9_\-\/:]+)/);
-      if (pathMatch && !line.includes("title:") && !line.includes("version:") && !line.includes("description:") && !line.includes("url:")) {
-        const detectedPath = pathMatch[0];
-        let prefix = "";
-        if (line.toUpperCase().includes("POST ")) prefix = "POST ";
-        else if (line.toUpperCase().includes("GET ")) prefix = "GET ";
-        else if (line.toUpperCase().includes("PUT ")) prefix = "PUT ";
-        else if (line.toUpperCase().includes("DELETE ")) prefix = "DELETE ";
-        
-        const endpointStr = prefix + detectedPath;
-        if (!endpoints.includes(endpointStr) && endpoints.length < 15) {
-          endpoints.push(endpointStr);
-        }
-      }
-      
-      // RPC definitions
-      if (line.trim().startsWith("rpc ")) {
-        const rpcMatch = line.trim().match(/rpc\s+(\w+)/);
-        if (rpcMatch) {
-          endpoints.push("rpc " + rpcMatch[1]);
-        }
-      }
-    });
-
-    if (endpoints.length === 0) {
-      endpoints.push("POST /api/v2/payment/intent");
-      endpoints.push("GET /api/v2/payment/intent/:id/confirm");
-    }
-  }
-
-  // Populate findings based on triggers
-  if (isDuplicateSuccessWebhookScenario) {
-    findings.push({
-      endpoint: "POST /webhooks",
-      severity: "CRITICAL",
-      category: "Double Mutation Check",
-      description: `Scenario:\nDuplicate Success Webhook\n\nResult:\nPayment state mutated twice.\n\nBusiness Impact:\nCustomer may receive duplicate settlement confirmation.\n\nRisk:\nHigh\n\nRecommended Fix:\nImplement idempotency token validation.`
-    });
-  } else {
-    if (hasAdminRoguePaths) {
-      findings.push({
-        endpoint: endpoints.find(e => e.includes("admin") || e.includes("refund")) || "/v2/admin/refunds",
-        severity: "CRITICAL",
-        category: "Security Checks",
-        description: "Returns highly-sensitive records or system elements without TLS checks, proper authorization checks, or RBAC scopes. Leads to mass credentials harvesting."
-      });
-    }
-    
-    if (hasUnauthenticatedWebhooks) {
-      findings.push({
-        endpoint: endpoints.find(e => e.includes("webhook") || e.includes("payout")) || "/v2/webhooks/payout",
-        severity: "CRITICAL",
-        category: "Authentication",
-        description: "Webhook callback operates completely unauthenticated. Bad actors can forge signature hashes to trigger rogue fund settlements background tasks."
-      });
-    }
-
-    if (findings.length === 0 && authEnforcedCount === 0) {
-      findings.push({
-        endpoint: "GLOBAL ROUTER",
-        severity: "CRITICAL",
-        category: "Authentication",
-        description: "No secure gateway or token checks are specified. Active routes default to completely public access vectors."
-      });
-    }
-
-    if (hasWildcardCors) {
-      findings.push({
-        endpoint: "GLOBAL POLICY",
-        severity: "WARNING",
-        category: "Configuration",
-        description: "CORS parameters configured to open wildcard '*'. Enforces high risk of client-side cross-site session leaks."
-      });
-    }
-
-    if (hasHttpInsecure) {
-      findings.push({
-        endpoint: "GLOBAL POLICY",
-        severity: "WARNING",
-        category: "Configuration",
-        description: "Insecure transit (HTTP) used. Passwords, auth keys, and PII elements transmit in raw text across proxies."
-      });
-    }
-
-    if (endpoints.length > 0) {
-      findings.push({
-        endpoint: endpoints[0],
-        severity: "WARNING",
-        category: "Documentation",
-        description: "Endpoint missing explicit parameter metadata. Integration engineers face guessing payload schemas and error codes."
-      });
-    }
-
-    findings.push({
-      endpoint: endpoints[endpoints.length - 1] || "INDEX",
-      severity: "INFO",
-      category: "Design Rest",
-      description: "Endpoint correctly conforms to restful method naming and parameter placement conventions."
-    });
-  }
-
-  // Assemble Insights
-  if (findings.some(f => f.severity === "CRITICAL")) {
-    insights.push({
-      text: isDuplicateSuccessWebhookScenario 
-        ? `Double mutation threat checked inside ${projectName}`
-        : `Critical vulnerability detected inside ${projectName}`,
-      type: "critical",
-      timestamp: "Just now"
-    });
-  } else {
-    insights.push({
-      text: `Passed standard critical baseline checks for ${projectName}`,
-      type: "success",
-      timestamp: "Just now"
-    });
-  }
-  
-  insights.push({
-    text: `Successfully mapped ${endpoints.length} endpoints via real-time AST structure scan`,
-    type: "success",
-    timestamp: "Just now"
-  });
-
-  const criticalCount = findings.filter(f => f.severity === "CRITICAL").length;
-  const warningCount = findings.filter(f => f.severity === "WARNING").length;
-
-  let securityScore = isDuplicateSuccessWebhookScenario ? 35 : Math.max(30, 100 - (criticalCount * 18) - (warningCount * 7));
-  let documentationScore = isDuplicateSuccessWebhookScenario ? 80 : Math.max(45, Math.min(100, Math.round((schemaText.length / 450) * 12 + 55)));
-  let overallScore = Math.round((securityScore * 0.6) + (documentationScore * 0.4));
-
-  return {
-    endpoints,
-    findings,
-    insights,
-    overallScore,
-    securityScore,
-    documentationScore
-  };
-}
-
-export function generateLocalRemediationReport(projectName: string, findings: Finding[]): string {
-  const isDuplicateSuccessScenario = findings.some(f => f.category === "Double Mutation Check");
-  const criticals = findings.filter(f => f.severity === "CRITICAL");
-  const warnings = findings.filter(f => f.severity === "WARNING");
-
-  if (isDuplicateSuccessScenario) {
-    return `# Remediation & Mitigation Guide: ${projectName}
-  
-This report has been compiled dynamically via the completely **AI-Independent AST Ruleset Engine**. No external AI model was queried. Use the direct programmatic patches below.
-
----
-
-## 🚨 1. Mitigation Checklist: Duplicate Success Webhook Gaps (Double Mutation)
-
-* **Risk Level**: High
-* **Scenario**: Duplicate Success Webhook
-* **Result**: Payment state mutated twice.
-* **Business Impact**: Customer may receive duplicate settlement confirmation.
-* **Recommended Fix**: Implement idempotency token validation.
-
----
-
-## 🔒 2. Implementation: Redis-Backed Distributed Idempotency Lock
-
-To fully secure database queries from replay mutations, enforce standard unique idempotency header token checks on incoming webhook transactions:
-
-\`\`\`typescript
-import { Request, Response, NextFunction } from 'express';
-import Redis from 'ioredis'; // Distributed lock cache client
-
-const redisStore = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-
-export async function enforcePaymentIdempotency(req: Request, res: Response, next: NextFunction) {
-  const webhookSignature = req.headers['x-webhook-signature'];
-  const idempotencyKey = req.headers['idempotency-key'] as string;
-  
-  if (!idempotencyKey) {
-    return res.status(400).json({ 
-      error: 'Idempotency key required in transaction payload' 
-    });
-  }
-
-  // Atomically claim lock to prevent double mutations (10-minute expiry)
-  const lockKey = \`lock:webhook:idempotency:\${idempotencyKey}\`;
-  const acquiresLock = await redisStore.set(lockKey, 'pending', 'NX', 'EX', 600);
-
-  if (!acquiresLock) {
-    return res.status(409).json({ 
-      error: 'Conflict: Duplicate webhook processing in flight' 
-    });
-  }
-
-  try {
-    next();
-  } catch (err) {
-    // Release the lock on failure so the client can retry safely
-    await redisStore.del(lockKey);
-    res.status(500).json({ error: 'Internal business mutation failure' });
-  }
-}
-\`\`\`
-
----
-
-## 🛡️ AST Compliance Verification Certificate
-* **Analysis Mode**: Deterministic AST Regex Scan
-* **Evaluation Framework**: OWASP API Top 10 Matcher
-* **Idempotency Status**: SECURED (After Patch)
-* **Date**: ${new Date().toLocaleDateString()}
-`;
-  }
-
-  let md = `# Remediation Patch Report: ${projectName}
-  
-This report has been compiled dynamically via the completely **AI-Independent AST Ruleset Engine**. No external AI model was queried. Use the direct programmatic patches below.
-
----
-
-## Scorecard Checklist status
-* **Rule Audit Status**: ${criticals.length ? "⚠️ WARNING" : "✅ OPTIMAL"}
-* **Mitration Code Blocks**: Node.js / Express snippets generated.
-
-`;
-
-  if (criticals.length > 0) {
-    md += `## 🚨 1. Enforcing OAuth Checks & Role-Based Access controls\n\n`;
-    criticals.forEach((finding, idx) => {
-      md += `### [CRIT-${idx + 1}] Check on \`${finding.endpoint}\`
-* Issue type: ${finding.category}
-* Detail: ${finding.description}
-
-### Programmatic Patch:
-\`\`\`typescript
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-
-export function checkRequiredPermissions(scope: string) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'OAuth Bearer Token Required' });
-    }
-    
-    try {
-      const token = authHeader.split(' ')[1];
-      const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'fallback-sign-key');
-      if (!decoded.permissions?.includes(scope)) {
-        return res.status(403).json({ error: 'Forbidden: missing claim scope' });
-      }
-      next();
-    } catch (e) {
-      return res.status(403).json({ error: 'Invalid or expired JWT structure' });
-    }
-  };
-}
-\`\`\`
-
----
-
-`;
-    });
-  }
-
-  if (warnings.length > 0) {
-    md += `## ⚠️ 2. Cross-Origin Safety & Documentation Patch\n\n`;
-    warnings.forEach((finding, idx) => {
-      md += `### [WARN-${idx + 1}] Alert on \`${finding.endpoint}\`
-* Type: ${finding.category}
-* Context: ${finding.description}
-
-### Resolution Code pattern:
-\`\`\`typescript
-import cors from 'cors';
-
-export const securedCorsPolicy = cors({
-  origin: ['https://trusted-domain.com'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-});
-\`\`\`
-
-`;
-    });
-  }
-
-  md += `
----
-
-## 🔒 AST Compliance Verification Certificate
-* **Analysis Mode**: Deterministic AST Regex Scan
-* **Evaluation Framework**: OWASP API Top 10 Matcher
-* **Date**: ${new Date().toLocaleDateString()}
-`;
-
-  return md;
-}
-
+import { ProjectAnalysis } from "./types";
+import { PIPELINE_STEPS } from "./pipelineSteps";
+import { parseLocalEndpoints } from "./engine/rules";
+import { generateLocalRemediationReport } from "./engine/remediation";
 import MarkdownView from "./components/MarkdownView";
 
 export default function App() {
@@ -499,6 +47,10 @@ export default function App() {
   // Real analysis API integration state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiKeyConfigured, setGeminiKeyConfigured] = useState(false);
+  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
+  const [geminiKeyStatus, setGeminiKeyStatus] = useState<string | null>(null);
 
   // Pipeline Simulation states
   const [isSimulating, setIsSimulating] = useState(false);
@@ -651,6 +203,79 @@ export default function App() {
   }, [newTemplateId]);
 
   const activeProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
+
+  useEffect(() => {
+    const storedKey = localStorage.getItem("gemini_api_key");
+    if (storedKey) {
+      setGeminiKey(storedKey);
+    }
+
+    fetch("/api/health")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.keyConfigured) {
+          setGeminiKeyConfigured(true);
+        } else if (storedKey) {
+          return fetch("/api/gemini-key", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ apiKey: storedKey }),
+          });
+        }
+        return null;
+      })
+      .then((res) => {
+        if (res && !res.ok) {
+          setGeminiKeyStatus("Could not configure Gemini key on the server.");
+        }
+        if (res && res.ok) {
+          setGeminiKeyConfigured(true);
+        }
+      })
+      .catch(() => {
+        setGeminiKeyStatus("Unable to reach backend health endpoint.");
+      });
+  }, []);
+
+  const handleSaveGeminiKey = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmedKey = geminiKey.trim();
+    if (!trimmedKey) {
+      setGeminiKeyStatus("Gemini key cannot be empty.");
+      return;
+    }
+
+    setIsSavingGeminiKey(true);
+    setGeminiKeyStatus(null);
+
+    try {
+      const response = await fetch("/api/gemini-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: trimmedKey }),
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem("gemini_api_key", trimmedKey);
+        setGeminiKeyConfigured(true);
+        setGeminiKeyStatus("Gemini key saved and server configured.");
+      } else {
+        setGeminiKeyStatus(data?.error || "Failed to save the Gemini key.");
+      }
+    } catch (error) {
+      setGeminiKeyStatus("Network error while saving Gemini key.");
+    } finally {
+      setIsSavingGeminiKey(false);
+    }
+  };
+
+  const handleRemoveGeminiKey = () => {
+    setGeminiKey("");
+    setGeminiKeyConfigured(false);
+    setGeminiKeyStatus("Local Gemini key cleared. Restart the server to clear runtime config.");
+    localStorage.removeItem("gemini_api_key");
+  };
 
   // Handler for running the server-side audit
   const handleRunAudit = async (e: React.FormEvent) => {
@@ -1674,29 +1299,78 @@ export default function App() {
                 <p className="text-xs text-gray-500 mt-1">Configure thresholds for automated alert dispatches and mitigation requirements.</p>
               </div>
 
-              <div className="space-y-4 max-w-xl">
-                <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
-                  <div>
-                    <span className="text-xs font-semibold text-white block">Enforce strict token security</span>
-                    <p className="text-[11px] text-gray-500 leading-normal">Trigger warnings on endpoints lack auth headers or claim verify guards.</p>
+              <div className="space-y-6 max-w-2xl">
+                <div className="p-6 bg-[#0A0A0B] rounded-3xl border border-white/5 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Gemini Key</span>
+                      <h3 className="text-lg font-semibold text-white mt-1">Server-side Gemini Configuration</h3>
+                      <p className="text-xs text-gray-500 mt-1">Enter your Gemini API key to enable real backend auditing via /api/analyze.</p>
+                    </div>
+                    <span className={`text-[10px] font-mono px-2 py-1 rounded ${geminiKeyConfigured ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-rose-500/10 text-rose-300 border border-rose-500/20"}`}>
+                      {geminiKeyConfigured ? "Configured" : "Not configured"}
+                    </span>
                   </div>
-                  <input type="checkbox" defaultChecked className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
+
+                  <form onSubmit={handleSaveGeminiKey} className="grid gap-3">
+                    <label className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Gemini API Key</label>
+                    <input
+                      type="password"
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="Paste your Gemini API key"
+                      className="w-full bg-[#0A0A0B] border border-white/10 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                    />
+
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <button
+                        type="submit"
+                        disabled={isSavingGeminiKey}
+                        className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 transition-all disabled:opacity-60"
+                      >
+                        {isSavingGeminiKey ? "Saving…" : geminiKeyConfigured ? "Update Key" : "Save Key"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRemoveGeminiKey}
+                        disabled={isSavingGeminiKey}
+                        className="px-4 py-2 rounded-xl bg-white/5 text-gray-300 hover:bg-white/10 text-xs font-semibold transition-all"
+                      >
+                        Clear Local Key
+                      </button>
+                    </div>
+
+                    {geminiKeyStatus && (
+                      <p className="text-xs text-gray-400">{geminiKeyStatus}</p>
+                    )}
+                  </form>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
-                  <div>
-                    <span className="text-xs font-semibold text-white block">Auto-generate Swagger schemas</span>
-                    <p className="text-[11px] text-gray-500 leading-normal">Utilize Gemini to draft missing models if OpenAPI specs are incomplete.</p>
+                <div className="space-y-4 max-w-xl">
+                  <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
+                    <div>
+                      <span className="text-xs font-semibold text-white block">Enforce strict token security</span>
+                      <p className="text-[11px] text-gray-500 leading-normal">Trigger warnings on endpoints lack auth headers or claim verify guards.</p>
+                    </div>
+                    <input type="checkbox" defaultChecked className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
                   </div>
-                  <input type="checkbox" defaultChecked className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
-                </div>
 
-                <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
-                  <div>
-                    <span className="text-xs font-semibold text-white block">Slack webhook alarm dispatches</span>
-                    <p className="text-[11px] text-gray-500 leading-normal">Send payload status shifts directly to dev operations channels.</p>
+                  <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
+                    <div>
+                      <span className="text-xs font-semibold text-white block">Auto-generate Swagger schemas</span>
+                      <p className="text-[11px] text-gray-500 leading-normal">Utilize Gemini to draft missing models if OpenAPI specs are incomplete.</p>
+                    </div>
+                    <input type="checkbox" defaultChecked className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
                   </div>
-                  <input type="checkbox" className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
+
+                  <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
+                    <div>
+                      <span className="text-xs font-semibold text-white block">Slack webhook alarm dispatches</span>
+                      <p className="text-[11px] text-gray-500 leading-normal">Send payload status shifts directly to dev operations channels.</p>
+                    </div>
+                    <input type="checkbox" className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
+                  </div>
                 </div>
               </div>
             </div>

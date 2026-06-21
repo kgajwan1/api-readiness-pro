@@ -1,20 +1,82 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# API Readiness Pro
 
-# Run and deploy your AI Studio app
+A deterministic rule engine that audits API specs (OpenAPI/Swagger, gRPC, or
+raw endpoint descriptions) for security and documentation gaps, scored against
+OWASP API Top 10 and STRIDE-style categories — with an optional Gemini layer
+for narrative remediation.
 
-This contains everything you need to run your app locally.
+## Why deterministic-first
 
-View your app in AI Studio: https://ai.studio/apps/fe0b9719-82d6-4353-ac8c-2da15449d814
+Most "AI security scanner" demos are an LLM prompt wearing a UI. This one
+isn't:
 
-## Run Locally
+- **The detection logic runs with zero network calls and no API key.** CORS
+  wildcards, unauthenticated webhooks, insecure transit, missing auth
+  middleware, undocumented parameters — all caught by pattern matching against
+  the spec text, in `parseLocalEndpoints`
+  ([src/engine/rules.ts](src/engine/rules.ts)).
+- **The LLM is opt-in and downstream of detection, not part of it.** If you
+  configure a `GEMINI_API_KEY`, the server calls Gemini to write nicer prose
+  and code-patch snippets around findings the engine already produced
+  (`/api/analyze` in [server.ts](server.ts)). Remove the key and the scores,
+  findings, and a generated remediation report still come back identical —
+  see `generateLocalRemediationReport`
+  ([src/engine/remediation.ts](src/engine/remediation.ts)).
+- **Every score is explainable.** Each finding maps to a concrete rule (e.g.
+  "unauthenticated webhook" → Broken Authentication) instead of an opaque
+  model judgment.
 
-**Prerequisites:**  Node.js
+## 30-second demo
 
+```bash
+npm install
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Open `http://localhost:3000`, then either:
+
+- Click **RUN INTERACTIVE FLOW SIMULATION** to watch the 8-stage pipeline
+  (upload → AST route matching → domain extraction → state graph → fuzz
+  simulation → risk scoring → AI explanation → dashboard sync) run against the
+  built-in payment/refund/webhook sample, or
+- Click **NEW ANALYSIS**, pick one of the bundled templates (Stripe-like
+  payment gateway, JWT auth core, or a gRPC inventory worker), and run a real
+  audit.
+
+No API key required for either path.
+
+## What it checks
+
+| Rule | Category | Severity |
+|---|---|---|
+| Unauthenticated webhook/payout endpoint | Broken Authentication | Critical |
+| Admin/refund route without TLS, auth, or RBAC scope | Security Misconfiguration | Critical |
+| No security scheme on any route | Broken Authentication | Critical |
+| Duplicate webhook delivery without idempotency check | Double Mutation / Replay | Critical |
+| Wildcard CORS (`Access-Control-Allow-Origin: *`) | Misconfiguration | Warning |
+| Plaintext HTTP instead of HTTPS | Insecure Transport | Warning |
+| Missing parameter descriptions / blank docs | Documentation | Warning |
+
+Each audit produces three scores (Overall Readiness, Security, Documentation)
+and a Markdown remediation report with runnable Express/TypeScript patches.
+
+## Architecture
+
+```
+server.ts            — Express app; optional Gemini enrichment endpoint (/api/analyze)
+src/engine/rules.ts        — deterministic rule engine (parseLocalEndpoints)
+src/engine/remediation.ts  — Markdown remediation report generator
+src/App.tsx           — dashboard UI; imports the engine above
+src/data.ts            — sample projects and OpenAPI/gRPC templates used by the demo
+sample-apis/           — standalone spec files you can paste into the demo
+```
+
+`src/engine/` has no dependency on `server.ts`, React, or any network call —
+it's plain TypeScript functions over the spec text.
+
+## Enabling AI-assisted remediation (optional)
+
+Set `GEMINI_API_KEY` in `.env.local`, or paste it into the **Policy Settings**
+tab in the UI. With it configured, `/api/analyze` enriches the same
+deterministic result with Gemini-generated explanations; without it, the app
+falls back to the offline rule engine automatically.

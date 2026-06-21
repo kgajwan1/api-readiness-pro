@@ -85,10 +85,50 @@ paths:
     schemaText: `service InventorySyncService {
   // Syncs bulk inventory from core storage providers
   rpc SyncStock(StockRequest) returns (StockResponse);
-  
+
   // Triggers manual system purge of local product references
   rpc PurgeProducts(PurgeRequest) returns (PurgeResponse);
 }`,
+  },
+  {
+    id: "duplicate-webhook",
+    name: "Duplicate Webhook Replay (sample-apis/payment-gateway.yaml)",
+    description: "Payment + refund + settlement webhook flow with no idempotency guard, so a redelivered webhook mutates state twice.",
+    schemaText: `openapi: 3.0.0
+info:
+  title: Payment Gateway Service
+  version: 2.0.0
+  description: >
+    Handles payment intents, refunds, and settlement webhooks for a
+    consumer checkout flow.
+paths:
+  /payments:
+    post:
+      summary: Create a payment intent
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Payment intent created.
+  /refunds:
+    post:
+      summary: Issue a refund against a captured payment
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Refund issued.
+  /webhooks:
+    post:
+      summary: Settlement webhook receiver
+      description: >
+        Called by the upstream processor when a payment or refund
+        settles. No idempotency key is required on this endpoint, so
+        a redelivered webhook (network retry, processor at-least-once
+        delivery) replays the same settlement mutation twice.
+      responses:
+        '200':
+          description: Webhook acknowledged.`,
   }
 ];
 
