@@ -32,6 +32,14 @@ import { parseLocalEndpoints } from "./engine/rules";
 import { generateLocalRemediationReport } from "./engine/remediation";
 import MarkdownView from "./components/MarkdownView";
 
+type LlmProvider = "gemini" | "openai" | "anthropic";
+const LLM_PROVIDERS: LlmProvider[] = ["gemini", "openai", "anthropic"];
+const LLM_PROVIDER_LABELS: Record<LlmProvider, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI (GPT)",
+  anthropic: "Claude",
+};
+
 export default function App() {
   const [projects, setProjects] = useState<ProjectAnalysis[]>(DEFAULT_PROJECTS);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("payment-gateway-v2");
@@ -47,10 +55,15 @@ export default function App() {
   // Real analysis API integration state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [geminiKey, setGeminiKey] = useState("");
-  const [geminiKeyConfigured, setGeminiKeyConfigured] = useState(false);
-  const [isSavingGeminiKey, setIsSavingGeminiKey] = useState(false);
-  const [geminiKeyStatus, setGeminiKeyStatus] = useState<string | null>(null);
+
+  // Multi-provider LLM key configuration: any of Gemini, OpenAI, or Claude works.
+  const [llmKeys, setLlmKeys] = useState<Record<LlmProvider, string>>({ gemini: "", openai: "", anthropic: "" });
+  const [llmConfigured, setLlmConfigured] = useState<Record<LlmProvider, boolean>>({ gemini: false, openai: false, anthropic: false });
+  const [activeProvider, setActiveProvider] = useState<LlmProvider>("gemini");
+  const [savingProvider, setSavingProvider] = useState<LlmProvider | null>(null);
+  const [llmKeyStatus, setLlmKeyStatus] = useState<string | null>(null);
+  // Project IDs currently being enriched by a background LLM call
+  const [enrichingProjectIds, setEnrichingProjectIds] = useState<Set<string>>(new Set());
 
   // Pipeline Simulation states
   const [isSimulating, setIsSimulating] = useState(false);
@@ -205,76 +218,83 @@ export default function App() {
   const activeProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
 
   useEffect(() => {
-    const storedKey = localStorage.getItem("gemini_api_key");
-    if (storedKey) {
-      setGeminiKey(storedKey);
-    }
+    const storedKeys: Record<LlmProvider, string> = {
+      gemini: localStorage.getItem("llm_key_gemini") || "",
+      openai: localStorage.getItem("llm_key_openai") || "",
+      anthropic: localStorage.getItem("llm_key_anthropic") || "",
+    };
+    setLlmKeys(storedKeys);
 
     fetch("/api/health")
       .then((res) => res.json())
-      .then((data) => {
-        if (data?.keyConfigured) {
-          setGeminiKeyConfigured(true);
-        } else if (storedKey) {
-          return fetch("/api/gemini-key", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ apiKey: storedKey }),
-          });
+      .then(async (data) => {
+        const serverConfigured: Record<LlmProvider, boolean> = data?.providers || { gemini: false, openai: false, anthropic: false };
+
+        // Re-sync any locally stored key that the server doesn't know about yet
+        // (e.g. server restarted and lost its in-memory runtime keys).
+        for (const provider of LLM_PROVIDERS) {
+          if (!serverConfigured[provider] && storedKeys[provider]) {
+            const res = await fetch("/api/llm-key", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ provider, apiKey: storedKeys[provider] }),
+            });
+            if (res.ok) {
+              serverConfigured[provider] = true;
+            }
+          }
         }
-        return null;
-      })
-      .then((res) => {
-        if (res && !res.ok) {
-          setGeminiKeyStatus("Could not configure Gemini key on the server.");
-        }
-        if (res && res.ok) {
-          setGeminiKeyConfigured(true);
+
+        setLlmConfigured(serverConfigured);
+        const firstConfigured = LLM_PROVIDERS.find((p) => serverConfigured[p]);
+        if (firstConfigured) {
+          setActiveProvider(firstConfigured);
         }
       })
       .catch(() => {
-        setGeminiKeyStatus("Unable to reach backend health endpoint.");
+        setLlmKeyStatus("Unable to reach backend health endpoint.");
       });
   }, []);
 
-  const handleSaveGeminiKey = async (event: React.FormEvent) => {
+  const handleSaveLlmKey = async (provider: LlmProvider, event: React.FormEvent) => {
     event.preventDefault();
-    const trimmedKey = geminiKey.trim();
+    const trimmedKey = llmKeys[provider].trim();
     if (!trimmedKey) {
-      setGeminiKeyStatus("Gemini key cannot be empty.");
+      setLlmKeyStatus(`${LLM_PROVIDER_LABELS[provider]} key cannot be empty.`);
       return;
     }
 
-    setIsSavingGeminiKey(true);
-    setGeminiKeyStatus(null);
+    setSavingProvider(provider);
+    setLlmKeyStatus(null);
 
     try {
-      const response = await fetch("/api/gemini-key", {
+      const response = await fetch("/api/llm-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: trimmedKey }),
+        body: JSON.stringify({ provider, apiKey: trimmedKey }),
       });
       const data = await response.json();
 
       if (response.ok) {
-        localStorage.setItem("gemini_api_key", trimmedKey);
-        setGeminiKeyConfigured(true);
-        setGeminiKeyStatus("Gemini key saved and server configured.");
+        localStorage.setItem(`llm_key_${provider}`, trimmedKey);
+        setLlmConfigured((prev) => ({ ...prev, [provider]: true }));
+        setActiveProvider(provider);
+        setLlmKeyStatus(`${LLM_PROVIDER_LABELS[provider]} key saved and server configured.`);
       } else {
-        setGeminiKeyStatus(data?.error || "Failed to save the Gemini key.");
+        setLlmKeyStatus(data?.error || `Failed to save the ${LLM_PROVIDER_LABELS[provider]} key.`);
       }
     } catch (error) {
-      setGeminiKeyStatus("Network error while saving Gemini key.");
+      setLlmKeyStatus(`Network error while saving the ${LLM_PROVIDER_LABELS[provider]} key.`);
     } finally {
-      setIsSavingGeminiKey(false);
+      setSavingProvider(null);
     }
   };
 
-  const handleRemoveGeminiKey = () => {
-    setGeminiKey("");
-    setGeminiKeyConfigured(false);
-    setGeminiKeyStatus("Local Gemini key cleared. Restart the server to clear runtime config.");
-    localStorage.removeItem("gemini_api_key");
+  const handleRemoveLlmKey = (provider: LlmProvider) => {
+    setLlmKeys((prev) => ({ ...prev, [provider]: "" }));
+    setLlmConfigured((prev) => ({ ...prev, [provider]: false }));
+    setLlmKeyStatus(`Local ${LLM_PROVIDER_LABELS[provider]} key cleared. Restart the server to clear runtime config.`);
+    localStorage.removeItem(`llm_key_${provider}`);
   };
 
   // Handler for running the server-side audit
@@ -292,13 +312,15 @@ export default function App() {
     setIsAnalyzing(true);
     setAnalysisError(null);
 
-    // 1. Run local, deterministic rule-based analysis immediately
+    // Run local, deterministic rule-based analysis — this is the whole
+    // result for an unconfigured install, so show it immediately rather
+    // than blocking the UI on an optional, much slower LLM call.
     const cleanProjName = newProjectName.replace(/\s+/g, "_");
     const localResult = parseLocalEndpoints(cleanProjName, customSchemaText);
     const now = new Date();
     const dateString = now.toISOString().slice(0, 10) + " " + now.toTimeString().slice(0, 5);
 
-    let finalAnalysis: ProjectAnalysis = {
+    const finalAnalysis: ProjectAnalysis = {
       id: `project-${Date.now()}`,
       projectName: cleanProjName,
       lastScan: dateString,
@@ -313,50 +335,54 @@ export default function App() {
       remediationReport: generateLocalRemediationReport(cleanProjName, localResult.findings),
     };
 
-    // 2. Effort to query Gemini server-side route lazily. If it fails, fall back to offline-checked report!
-    try {
-      const response = await fetch("/api/analyze", {
+    setProjects((prev) => [finalAnalysis, ...prev]);
+    setSelectedProjectId(finalAnalysis.id);
+    setShowNewAnalysisModal(false);
+    setNewProjectName("");
+    setNewTemplateId("stripe-like");
+    setIsAnalyzing(false);
+
+    // If an LLM provider is configured, ask it to write narrative
+    // remediation prose for the findings the deterministic engine already
+    // produced. The scorecard, status, and findings list are never
+    // touched by this — only remediationReport gets patched in place
+    // when (and if) the call resolves.
+    if (llmConfigured[activeProvider]) {
+      setEnrichingProjectIds((prev) => new Set(prev).add(finalAnalysis.id));
+      fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectName: cleanProjName,
           schemaText: customSchemaText,
-          templateId: newTemplateId,
+          findings: localResult.findings,
+          provider: activeProvider,
         }),
-      });
-
-      if (response.ok) {
-        const reportData = await response.json();
-        
-        // Enrich report with AI Explanation details while keeping structure
-        finalAnalysis = {
-          ...finalAnalysis,
-          endpointCount: reportData.endpointCount || finalAnalysis.endpointCount,
-          status: reportData.status || finalAnalysis.status,
-          overallScore: reportData.overallScore || finalAnalysis.overallScore,
-          securityScore: reportData.securityScore || finalAnalysis.securityScore,
-          documentationScore: reportData.documentationScore || finalAnalysis.documentationScore,
-          findings: reportData.findings && reportData.findings.length ? reportData.findings : finalAnalysis.findings,
-          insights: reportData.insights && reportData.insights.length ? reportData.insights : finalAnalysis.insights,
-          remediationReport: reportData.remediationReport || finalAnalysis.remediationReport,
-        };
-        console.log("Successful API enrichment with external Gemini explanation.");
-      } else {
-        console.warn("Server did not return a successful response. Utilizing offline-first AST ruleset engine fallback.");
-      }
-    } catch (err: any) {
-      console.warn("Connection or credentials missing for Gemini API. Gracefully defaulting to offline AST scan.", err);
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            console.warn("Server did not return a successful response. Keeping the offline AST ruleset report.");
+            return;
+          }
+          const { remediationReport } = await response.json();
+          if (remediationReport) {
+            setProjects((prev) =>
+              prev.map((p) => (p.id === finalAnalysis.id ? { ...p, remediationReport } : p))
+            );
+          }
+          console.log(`Successful background enrichment with ${activeProvider}.`);
+        })
+        .catch((err) => {
+          console.warn("Connection or credentials missing for the configured LLM provider. Keeping the offline AST ruleset report.", err);
+        })
+        .finally(() => {
+          setEnrichingProjectIds((prev) => {
+            const next = new Set(prev);
+            next.delete(finalAnalysis.id);
+            return next;
+          });
+        });
     }
-
-    // Append and focus result
-    setProjects([finalAnalysis, ...projects]);
-    setSelectedProjectId(finalAnalysis.id);
-    setShowNewAnalysisModal(false);
-    
-    // Reset fields
-    setNewProjectName("");
-    setNewTemplateId("stripe-like");
-    setIsAnalyzing(false);
   };
 
   const filteredProjects = projects.filter((p) =>
@@ -451,7 +477,7 @@ export default function App() {
             </div>
           </div>
           <p className="text-xs text-gray-400 leading-normal">
-            Utilizing server-side Gemini 3.5 to process high-entropy microservice architectures in real-time.
+            Utilizing a deterministic AST ruleset, with optional Gemini, OpenAI, or Claude enrichment, to process high-entropy microservice architectures in real-time.
           </p>
         </div>
 
@@ -550,10 +576,18 @@ export default function App() {
                       <h3 className="text-base font-semibold text-white">Score at a Glance</h3>
                       <p className="text-xs text-gray-500">Live security & compliance telemetry metrics</p>
                     </div>
-                    {/* Active target project badge */}
-                    <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Target: {activeProject.projectName}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {enrichingProjectIds.has(activeProject.id) && (
+                        <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                          Enriching via {LLM_PROVIDER_LABELS[activeProvider]}…
+                        </span>
+                      )}
+                      {/* Active target project badge */}
+                      <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Target: {activeProject.projectName}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-2">
@@ -1171,7 +1205,7 @@ export default function App() {
                     </div>
                     
                     <span className="text-[10px] font-mono text-gray-500 bg-white/5 px-2 py-1 rounded">
-                      Scanned Engine: GEMINI-3.5-FLASH
+                      Scanned Engine: {llmConfigured[activeProvider] ? `${LLM_PROVIDER_LABELS[activeProvider].toUpperCase()} + AST` : "AST RULESET (OFFLINE)"}
                     </span>
                   </div>
 
@@ -1300,51 +1334,73 @@ export default function App() {
               </div>
 
               <div className="space-y-6 max-w-2xl">
-                <div className="p-6 bg-[#0A0A0B] rounded-3xl border border-white/5 space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Gemini Key</span>
-                      <h3 className="text-lg font-semibold text-white mt-1">Server-side Gemini Configuration</h3>
-                      <p className="text-xs text-gray-500 mt-1">Enter your Gemini API key to enable real backend auditing via /api/analyze.</p>
-                    </div>
-                    <span className={`text-[10px] font-mono px-2 py-1 rounded ${geminiKeyConfigured ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-rose-500/10 text-rose-300 border border-rose-500/20"}`}>
-                      {geminiKeyConfigured ? "Configured" : "Not configured"}
-                    </span>
+                <div className="p-6 bg-[#0A0A0B] rounded-3xl border border-white/5 space-y-5">
+                  <div>
+                    <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">LLM Provider Keys</span>
+                    <h3 className="text-lg font-semibold text-white mt-1">Server-side AI Enrichment Configuration</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Configure any one (or more) of Gemini, OpenAI, or Claude to enable real backend auditing via /api/analyze.
+                      The deterministic engine works with none of these configured.
+                    </p>
                   </div>
 
-                  <form onSubmit={handleSaveGeminiKey} className="grid gap-3">
-                    <label className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold">Gemini API Key</label>
-                    <input
-                      type="password"
-                      value={geminiKey}
-                      onChange={(e) => setGeminiKey(e.target.value)}
-                      placeholder="Paste your Gemini API key"
-                      className="w-full bg-[#0A0A0B] border border-white/10 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
-                    />
+                  {LLM_PROVIDERS.map((provider) => (
+                    <div key={provider} className="p-4 bg-[#161618] border border-white/5 rounded-2xl space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="active-llm-provider"
+                            checked={activeProvider === provider}
+                            onChange={() => setActiveProvider(provider)}
+                            disabled={!llmConfigured[provider]}
+                            className="accent-emerald-500"
+                            title="Use this provider for new analyses"
+                          />
+                          <h4 className="text-sm font-semibold text-white">{LLM_PROVIDER_LABELS[provider]}</h4>
+                          {activeProvider === provider && llmConfigured[provider] && (
+                            <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">ACTIVE</span>
+                          )}
+                        </div>
+                        <span className={`text-[10px] font-mono px-2 py-1 rounded ${llmConfigured[provider] ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" : "bg-rose-500/10 text-rose-300 border border-rose-500/20"}`}>
+                          {llmConfigured[provider] ? "Configured" : "Not configured"}
+                        </span>
+                      </div>
 
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <button
-                        type="submit"
-                        disabled={isSavingGeminiKey}
-                        className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 transition-all disabled:opacity-60"
-                      >
-                        {isSavingGeminiKey ? "Saving…" : geminiKeyConfigured ? "Update Key" : "Save Key"}
-                      </button>
+                      <form onSubmit={(e) => handleSaveLlmKey(provider, e)} className="grid gap-2.5">
+                        <input
+                          type="password"
+                          value={llmKeys[provider]}
+                          onChange={(e) => setLlmKeys((prev) => ({ ...prev, [provider]: e.target.value }))}
+                          placeholder={`Paste your ${LLM_PROVIDER_LABELS[provider]} API key`}
+                          className="w-full bg-[#0A0A0B] border border-white/10 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500/50"
+                        />
 
-                      <button
-                        type="button"
-                        onClick={handleRemoveGeminiKey}
-                        disabled={isSavingGeminiKey}
-                        className="px-4 py-2 rounded-xl bg-white/5 text-gray-300 hover:bg-white/10 text-xs font-semibold transition-all"
-                      >
-                        Clear Local Key
-                      </button>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <button
+                            type="submit"
+                            disabled={savingProvider === provider}
+                            className="px-4 py-2 rounded-xl bg-emerald-500 text-black text-xs font-semibold hover:bg-emerald-400 transition-all disabled:opacity-60"
+                          >
+                            {savingProvider === provider ? "Saving…" : llmConfigured[provider] ? "Update Key" : "Save Key"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveLlmKey(provider)}
+                            disabled={savingProvider === provider}
+                            className="px-4 py-2 rounded-xl bg-white/5 text-gray-300 hover:bg-white/10 text-xs font-semibold transition-all"
+                          >
+                            Clear Local Key
+                          </button>
+                        </div>
+                      </form>
                     </div>
+                  ))}
 
-                    {geminiKeyStatus && (
-                      <p className="text-xs text-gray-400">{geminiKeyStatus}</p>
-                    )}
-                  </form>
+                  {llmKeyStatus && (
+                    <p className="text-xs text-gray-400">{llmKeyStatus}</p>
+                  )}
                 </div>
 
                 <div className="space-y-4 max-w-xl">
@@ -1359,7 +1415,7 @@ export default function App() {
                   <div className="flex items-center justify-between p-4 bg-[#0A0A0B] border border-white/5 rounded-xl">
                     <div>
                       <span className="text-xs font-semibold text-white block">Auto-generate Swagger schemas</span>
-                      <p className="text-[11px] text-gray-500 leading-normal">Utilize Gemini to draft missing models if OpenAPI specs are incomplete.</p>
+                      <p className="text-[11px] text-gray-500 leading-normal">Utilize the configured LLM provider to draft missing models if OpenAPI specs are incomplete.</p>
                     </div>
                     <input type="checkbox" defaultChecked className="rounded border-white/10 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 bg-[#09090a]" />
                   </div>
@@ -1388,7 +1444,7 @@ export default function App() {
                 <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">How to connect live specifications:</h4>
                 <ol className="list-decimal pl-5 text-xs text-gray-400 space-y-2">
                   <li>Paste any raw spec block inside the "New Analysis" Modal.</li>
-                  <li>Click 'Compile Real Security Test' to execute actual Gemini LLM auditing processes.</li>
+                  <li>Click 'Compile Real Security Test' to run the deterministic engine, plus your configured LLM provider (Gemini, OpenAI, or Claude) for enrichment.</li>
                   <li>Incorporate returned recommendations inside your Express, FastAPI, or Go backends.</li>
                 </ol>
               </div>
@@ -1400,7 +1456,7 @@ export default function App() {
         {/* BOTTOM GLOBAL FOOTER */}
         <footer className="mt-auto bg-[#070708] border-t border-white/5 py-6">
           <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center px-8 gap-4 text-xs">
-            <p className="text-gray-500">© 2026 API Readiness Pro. Driven by Gemini 3.5 Intelligence. All rights absolute.</p>
+            <p className="text-gray-500">© 2026 API Readiness Pro. Deterministic by default, LLM-enriched on request. All rights absolute.</p>
             <div className="flex gap-6">
               <a href="#" className="font-semibold text-gray-400 hover:text-emerald-400 transition-colors">Developer Resources</a>
               <a href="#" className="font-semibold text-gray-400 hover:text-emerald-400 transition-colors">API Status</a>
@@ -1423,7 +1479,7 @@ export default function App() {
                 <Sparkles className="w-5 h-5 text-emerald-400" />
                 <div>
                   <h3 className="text-base font-semibold text-white">Run Real API Audit & Security Scan</h3>
-                  <p className="text-[11px] text-gray-500">Utilizes server-side Gemini 3.5-flash content generation</p>
+                  <p className="text-[11px] text-gray-500">Deterministic AST scan, plus optional {LLM_PROVIDER_LABELS[activeProvider]} enrichment</p>
                 </div>
               </div>
               
@@ -1503,7 +1559,7 @@ export default function App() {
                 <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-start gap-2.5">
                   <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                   <div className="text-xs text-rose-400 leading-normal font-sans">
-                    <strong>Scan failed: </strong> {analysisError} Ensure your <code>GEMINI_API_KEY</code> is correctly loaded.
+                    <strong>Scan failed: </strong> {analysisError}
                   </div>
                 </div>
               )}
@@ -1550,7 +1606,7 @@ export default function App() {
                 <div className="text-center space-y-1">
                   <h4 className="text-sm font-semibold text-white tracking-tight">AI Security Compilation Active</h4>
                   <p className="text-xs text-gray-500 max-w-sm px-6 leading-relaxed">
-                    Analyzing routes context patterns against mitigation checklists via Gemini 3.5-flash server routing...
+                    Analyzing route context patterns against mitigation checklists via the deterministic engine and {LLM_PROVIDER_LABELS[activeProvider]}...
                   </p>
                 </div>
               </div>

@@ -2,8 +2,9 @@
 
 A deterministic rule engine that audits API specs (OpenAPI/Swagger, gRPC, or
 raw endpoint descriptions) for security and documentation gaps, scored against
-OWASP API Top 10 and STRIDE-style categories — with an optional Gemini layer
-for narrative remediation.
+OWASP API Top 10 and STRIDE-style categories — with an optional LLM layer
+(Gemini, OpenAI, or Claude — bring whichever key you have) for narrative
+remediation.
 
 ## Why deterministic-first
 
@@ -15,10 +16,11 @@ isn't:
   middleware, undocumented parameters — all caught by pattern matching against
   the spec text, in `parseLocalEndpoints`
   ([src/engine/rules.ts](src/engine/rules.ts)).
-- **The LLM is opt-in and downstream of detection, not part of it.** If you
-  configure a `GEMINI_API_KEY`, the server calls Gemini to write nicer prose
+- **The LLM is opt-in, swappable, and downstream of detection, not part of
+  it.** Configure a `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
+  (any one works) and the server calls that provider to write nicer prose
   and code-patch snippets around findings the engine already produced
-  (`/api/analyze` in [server.ts](server.ts)). Remove the key and the scores,
+  (`/api/analyze` in [server.ts](server.ts)). Remove all keys and the scores,
   findings, and a generated remediation report still come back identical —
   see `generateLocalRemediationReport`
   ([src/engine/remediation.ts](src/engine/remediation.ts)).
@@ -63,7 +65,7 @@ and a Markdown remediation report with runnable Express/TypeScript patches.
 ## Architecture
 
 ```
-server.ts            — Express app; optional Gemini enrichment endpoint (/api/analyze)
+server.ts            — Express app; pluggable Gemini/OpenAI/Claude enrichment (/api/analyze)
 src/engine/rules.ts        — deterministic rule engine (parseLocalEndpoints)
 src/engine/remediation.ts  — Markdown remediation report generator
 src/App.tsx           — dashboard UI; imports the engine above
@@ -76,7 +78,9 @@ it's plain TypeScript functions over the spec text.
 
 ## Enabling AI-assisted remediation (optional)
 
-Set `GEMINI_API_KEY` in `.env.local`, or paste it into the **Policy Settings**
-tab in the UI. With it configured, `/api/analyze` enriches the same
-deterministic result with Gemini-generated explanations; without it, the app
-falls back to the offline rule engine automatically.
+Set `GEMINI_API_KEY`, `OPENAI_API_KEY`, and/or `ANTHROPIC_API_KEY` in
+`.env.local`, or paste any of them into the **Policy Settings** tab in the UI
+— each provider has its own key field, and you pick which one is active for
+new analyses. With one configured, `/api/analyze` enriches the same
+deterministic result with that provider's generated explanations; without
+any key, the app falls back to the offline rule engine automatically.
